@@ -155,13 +155,10 @@ def start_scraping(tanggal_awal, tanggal_akhir, kata_kunci_lapus_df, kata_kunci_
                     page_url = base_url + f"&start={start}"
                     driver.get(page_url)
                     
-                    # --- PERBAIKAN: Logika Scraping yang Lebih Stabil ---
                     try:
-                        # Tunggu hingga setidaknya satu wadah berita muncul
                         WebDriverWait(driver, 10).until(
                             EC.presence_of_element_located((By.CSS_SELECTOR, "div.SoaBEf"))
                         )
-                        # Ambil semua wadah berita
                         search_results = driver.find_elements(By.CSS_SELECTOR, "div.SoaBEf")
 
                         for result in search_results:
@@ -174,17 +171,30 @@ def start_scraping(tanggal_awal, tanggal_akhir, kata_kunci_lapus_df, kata_kunci_
                                 tanggal = result.find_element(By.CSS_SELECTOR, "div.OSrXXb > span").text.strip()
                                 ringkasan = ambil_ringkasan(link)
 
-                                if not any(loc in judul.lower() for loc in lokasi_filter) and not any(loc in ringkasan.lower() for loc in lokasi_filter):
-                                    continue
-                                
-                                if keyword.lower() not in ringkasan.lower():
-                                    continue
+                                # --- PERUBAHAN: Logika Filter yang Lebih Fleksibel ---
+                                judul_lower = judul.lower()
+                                ringkasan_lower = ringkasan.lower()
+                                keyword_lower = keyword.lower()
 
-                                hasil_kategori.append({"Nomor": nomor, "Kata Kunci": keyword, "Judul": judul, "Link": link, "Tanggal": tanggal, "Ringkasan": ringkasan})
-                                nomor += 1
-                                set_link.add(link)
+                                # Kondisi 1: Lokasi harus ada di judul atau ringkasan
+                                lokasi_ditemukan = any(loc in judul_lower for loc in lokasi_filter) or \
+                                                   any(loc in ringkasan_lower for loc in lokasi_filter)
+
+                                # Kondisi 2: Kata kunci harus ada di judul atau ringkasan
+                                keyword_ditemukan = keyword_lower in judul_lower or keyword_lower in ringkasan_lower
+
+                                if lokasi_ditemukan and keyword_ditemukan:
+                                    hasil_kategori.append({
+                                        "Nomor": nomor,
+                                        "Kata Kunci": keyword,
+                                        "Judul": judul,
+                                        "Link": link,
+                                        "Tanggal": tanggal,
+                                        "Ringkasan": ringkasan
+                                    })
+                                    nomor += 1
+                                    set_link.add(link)
                             except NoSuchElementException:
-                                # Lewati jika ada hasil pencarian yang strukturnya aneh
                                 continue
                     except TimeoutException:
                         st.text(f"     -- Tidak ada hasil di halaman ini untuk '{keyword}'")
@@ -326,7 +336,6 @@ elif st.session_state.page == "Scraping":
                 
                 st.header("Atur Parameter Scraping")
                 
-                # --- PERBAIKAN: Input diletakkan di luar form ---
                 tahun_list = ["--Pilih Tahun--"] + list(range(2020, 2026))
                 tahun_input = st.selectbox("Pilih Tahun:", options=tahun_list)
 
@@ -353,17 +362,14 @@ elif st.session_state.page == "Scraping":
                         options=original_categories
                     )
                 
-                # --- Form hanya untuk tombol submit ---
-                with st.form("scraping_form"):
-                    is_disabled = (
-                        tahun_input == "--Pilih Tahun--" or
-                        triwulan_input == "--Pilih Triwulan--" or
-                        mode_kategori == "--Pilih Opsi Kategori--" or
-                        (mode_kategori == 'Pilih Kategori Tertentu' and not kategori_terpilih)
-                    )
-                    submitted = st.form_submit_button("🚀 Mulai Scraping", use_container_width=True, type="primary", disabled=is_disabled)
-
-                if submitted:
+                is_disabled = (
+                    tahun_input == "--Pilih Tahun--" or
+                    triwulan_input == "--Pilih Triwulan--" or
+                    mode_kategori == "--Pilih Opsi Kategori--" or
+                    (mode_kategori == 'Pilih Kategori Tertentu' and not kategori_terpilih)
+                )
+                
+                if st.button("🚀 Mulai Scraping", use_container_width=True, type="primary", disabled=is_disabled):
                     tahun_int = int(tahun_input)
                     tanggal_awal, tanggal_akhir = get_rentang_tanggal(tahun_int, triwulan_input, start_date, end_date)
                     

@@ -8,10 +8,15 @@ import os
 import base64
 from urllib.parse import quote
 from bs4 import BeautifulSoup
-from datetime import date, datetime
+from datetime import date
 
-# --- Import Library PyGoogleNews ---
-from pygooglenews import GoogleNews
+# --- Import Library Selenium ---
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 
 # --- Konfigurasi Halaman Streamlit ---
 st.set_page_config(
@@ -52,22 +57,18 @@ def get_rentang_tanggal(tahun: int, triwulan: str, start_date=None, end_date=Non
     """Menghasilkan tanggal awal dan akhir berdasarkan tahun dan triwulan atau tanggal custom."""
     if triwulan == "Tanggal Custom":
         if start_date and end_date:
-            # Format untuk pygooglenews adalah YYYY-MM-DD
-            return start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')
+            return start_date.strftime('%m/%d/%Y'), end_date.strftime('%m/%d/%Y')
         else:
             return None, None
             
     triwulan_dict = {
-        "Triwulan 1": ("2024-01-01", "2024-03-31"),
-        "Triwulan 2": ("2024-04-01", "2024-06-30"),
-        "Triwulan 3": ("2024-07-01", "2024-09-30"),
-        "Triwulan 4": ("2024-10-01", "2024-12-31")
+        "Triwulan 1": ("1/1", "3/31"),
+        "Triwulan 2": ("4/1", "6/30"),
+        "Triwulan 3": ("7/1", "9/30"),
+        "Triwulan 4": ("10/1", "12/31")
     }
     awal, akhir = triwulan_dict[triwulan]
-    # Ganti tahunnya
-    awal = f"{tahun}-{awal[5:]}"
-    akhir = f"{tahun}-{akhir[5:]}"
-    return awal, akhir
+    return f"{awal}/{tahun}", f"{akhir}/{tahun}"
 
 def ambil_ringkasan(link):
     """Mengambil ringkasan/deskripsi dari sebuah link berita."""
@@ -87,9 +88,8 @@ def ambil_ringkasan(link):
         return ""
     return ""
 
-# --- Fungsi Utama untuk Menjalankan Scraping dengan PyGoogleNews ---
 def start_scraping(tanggal_awal, tanggal_akhir, kata_kunci_lapus_df, kata_kunci_daerah_df, start_time):
-    """Fungsi utama yang membungkus seluruh logika scraping menggunakan PyGoogleNews."""
+    """Fungsi utama yang membungkus seluruh logika scraping."""
     kata_kunci_lapus_dict = {c: kata_kunci_lapus_df[c].dropna().astype(str).str.strip().tolist() for c in kata_kunci_lapus_df.columns}
     kata_kunci_daerah_dict = {c: kata_kunci_daerah_df[c].dropna().astype(str).str.strip().tolist() for c in kata_kunci_daerah_df.columns}
 
@@ -102,11 +102,24 @@ def start_scraping(tanggal_awal, tanggal_akhir, kata_kunci_lapus_df, kata_kunci_
     lokasi_filter = [nama_daerah.lower()] + [kec.lower() for kec in kecamatan_list]
 
     status_placeholder = st.empty()
-    gn = GoogleNews(lang='id', country='ID')
+    status_placeholder.info("Mempersiapkan browser...")
+
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+
+    try:
+        driver = webdriver.Chrome(options=chrome_options)
+    except Exception as e:
+        st.error(f"Gagal memulai browser Chrome. Pastikan Chrome terinstal atau driver sudah benar. Error: {e}")
+        return None
+
     semua_hasil_df = {}
     total_kategori = len(kata_kunci_lapus_dict)
     kategori_ke = 0
-
     for kategori, kata_kunci_list in kata_kunci_lapus_dict.items():
         kategori_ke += 1
         hasil_kategori, set_link = [], set()
@@ -122,39 +135,58 @@ def start_scraping(tanggal_awal, tanggal_akhir, kata_kunci_lapus_df, kata_kunci_
             if not keyword: continue
             
             st.text(f"  ➡️ 🔍 Mencari: {keyword}")
-            query = f'{keyword} "{nama_daerah}"'
+            
+            query = quote(keyword + " " + nama_daerah)
+            base_url = f"https://www.google.com/search?q={query}&tbm=nws&tbs=cdr:1,cd_min:{tanggal_awal},cd_max:{tanggal_akhir},sbd:1"
 
             try:
-                search = gn.search(query, from_=tanggal_awal, to_=tanggal_akhir)
+                driver.get(base_url)
+                time.sleep(2)
+
+                pagination_links = driver.find_elements(By.XPATH, '//a[contains(@href, "start=")]')
+                start_values = {0}
+                for link in pagination_links:
+                    href = link.get_attribute("href")
+                    match = re.search(r"[?&]start=(\d+)", href)
+                    if match:
+                        start_values.add(int(match.group(1)))
                 
-                for entry in search['entries']:
-                    link = entry.link
-                    if link in set_link: continue
-
-                    judul = entry.title
-                    tanggal = entry.published
-                    ringkasan = ambil_ringkasan(link).lower()
-
-                    if not any(loc in judul.lower() for loc in lokasi_filter) and not any(loc in ringkasan for loc in lokasi_filter):
-                        continue
+                for start in sorted(start_values):
+                    page_url = base_url + f"&start={start}"
+                    driver.get(page_url)
                     
-                    if keyword.lower() not in ringkasan and keyword.lower() not in judul.lower():
+                    try:
+                        WebDriverWait(driver, 10).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, "div.SoaBEf"))
+                        )
+                        search_results = driver.find_elements(By.CSS_SELECTOR, "div.SoaBEf")
+
+                        for result in search_results:
+                            try:
+                                link_element = result.find_element(By.TAG_NAME, "a")
+                                link = link_element.get_attribute("href")
+                                if link in set_link: continue
+
+                                judul = result.find_element(By.CSS_SELECTOR, "div.MBeuO").text.strip()
+                                tanggal = result.find_element(By.CSS_SELECTOR, "div.OSrXXb > span").text.strip()
+                                ringkasan = ambil_ringkasan(link)
+
+                                # Filter Fleksibel
+                                lokasi_ditemukan = any(loc in judul.lower() or loc in ringkasan.lower() for loc in lokasi_filter)
+                                keyword_ditemukan = keyword.lower() in ringkasan.lower() or keyword.lower() in judul.lower()
+
+                                if lokasi_ditemukan and keyword_ditemukan:
+                                    hasil_kategori.append({"Nomor": nomor, "Kata Kunci": keyword, "Judul": judul, "Link": link, "Tanggal": tanggal, "Ringkasan": ringkasan})
+                                    nomor += 1
+                                    set_link.add(link)
+                            except NoSuchElementException:
+                                continue
+                    except TimeoutException:
+                        st.text(f"     -- Tidak ada hasil di halaman ini untuk '{keyword}'")
                         continue
-
-                    hasil_kategori.append({
-                        "Nomor": nomor,
-                        "Kata Kunci": keyword,
-                        "Judul": judul,
-                        "Link": link,
-                        "Tanggal": tanggal,
-                        "Ringkasan": ringkasan
-                    })
-                    nomor += 1
-                    set_link.add(link)
-                    time.sleep(0.5) # Jeda sopan agar tidak membebani server berita
-
+                        
             except Exception as e:
-                st.warning(f"Terjadi error saat memproses keyword '{keyword}'. Melanjutkan... Error: {e}")
+                st.warning(f"Terjadi error saat memproses keyword '{keyword}'. Melanjutkan... Error: {type(e).__name__}")
 
         if hasil_kategori:
             df_kat = pd.DataFrame(hasil_kategori)
@@ -162,6 +194,7 @@ def start_scraping(tanggal_awal, tanggal_akhir, kata_kunci_lapus_df, kata_kunci_
             st.markdown(f"**Hasil Pratinjau Kategori: {kategori}**")
             st.dataframe(df_kat.head(3), use_container_width=True)
 
+    driver.quit()
     status_placeholder.empty()
     return semua_hasil_df
 

@@ -141,7 +141,7 @@ def start_scraping(tanggal_awal, tanggal_akhir, kata_kunci_lapus_df, kata_kunci_
 
             try:
                 driver.get(base_url)
-                time.sleep(2)
+                time.sleep(2) # Beri waktu awal untuk memuat
 
                 pagination_links = driver.find_elements(By.XPATH, '//a[contains(@href, "start=")]')
                 start_values = {0}
@@ -154,35 +154,42 @@ def start_scraping(tanggal_awal, tanggal_akhir, kata_kunci_lapus_df, kata_kunci_
                 for start in sorted(start_values):
                     page_url = base_url + f"&start={start}"
                     driver.get(page_url)
-                    time.sleep(2)
                     
-                    judul_elements = driver.find_elements(By.XPATH, "//div[@class='n0jPhd ynAwRc MBeuO nDgy9d']")
-                    link_elements = driver.find_elements(By.XPATH, "//a[@class='WlydOe']")
-                    tanggal_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'OSrXXb')]/span")
+                    # --- PERBAIKAN: Logika Scraping yang Lebih Stabil ---
+                    try:
+                        # Tunggu hingga setidaknya satu wadah berita muncul
+                        WebDriverWait(driver, 10).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, "div.SoaBEf"))
+                        )
+                        # Ambil semua wadah berita
+                        search_results = driver.find_elements(By.CSS_SELECTOR, "div.SoaBEf")
 
-                    for judul_elem, link_elem, tanggal_elem in zip(judul_elements, link_elements, tanggal_elements):
-                        try:
-                            link = link_elem.get_attribute("href")
-                            if link in set_link: continue
+                        for result in search_results:
+                            try:
+                                link_element = result.find_element(By.TAG_NAME, "a")
+                                link = link_element.get_attribute("href")
+                                if link in set_link: continue
 
-                            judul = judul_elem.text.strip()
-                            tanggal = tanggal_elem.text.strip()
-                            ringkasan = ambil_ringkasan(link)
+                                judul = result.find_element(By.CSS_SELECTOR, "div.MBeuO").text.strip()
+                                tanggal = result.find_element(By.CSS_SELECTOR, "div.OSrXXb > span").text.strip()
+                                ringkasan = ambil_ringkasan(link)
 
-                            if not any(loc in judul.lower() for loc in lokasi_filter) and not any(loc in ringkasan.lower() for loc in lokasi_filter):
+                                if not any(loc in judul.lower() for loc in lokasi_filter) and not any(loc in ringkasan.lower() for loc in lokasi_filter):
+                                    continue
+                                
+                                if keyword.lower() not in ringkasan.lower():
+                                    continue
+
+                                hasil_kategori.append({"Nomor": nomor, "Kata Kunci": keyword, "Judul": judul, "Link": link, "Tanggal": tanggal, "Ringkasan": ringkasan})
+                                nomor += 1
+                                set_link.add(link)
+                            except NoSuchElementException:
+                                # Lewati jika ada hasil pencarian yang strukturnya aneh
                                 continue
-                            
-                            if keyword.lower() not in ringkasan.lower():
-                                continue
-
-                            hasil_kategori.append({"Nomor": nomor, "Kata Kunci": keyword, "Judul": judul, "Link": link, "Tanggal": tanggal, "Ringkasan": ringkasan})
-                            nomor += 1
-                            set_link.add(link)
-                        except Exception:
-                            continue
-            except TimeoutException:
-                st.text(f"     -- Tidak ada hasil untuk '{keyword}'")
-                continue
+                    except TimeoutException:
+                        st.text(f"     -- Tidak ada hasil di halaman ini untuk '{keyword}'")
+                        continue
+                        
             except Exception as e:
                 st.warning(f"Terjadi error saat memproses keyword '{keyword}'. Melanjutkan... Error: {type(e).__name__}")
 
@@ -316,7 +323,6 @@ elif st.session_state.page == "Scraping":
             if df_lapus is not None and df_daerah is not None:
                 st.success("✅ Data kata kunci berhasil dimuat.")
                 original_categories = df_lapus.columns.tolist()
-                grouped_categories = sorted(list(set([re.split(r'_|-', cat)[0] for cat in original_categories])))
                 
                 st.header("Atur Parameter Scraping")
                 
@@ -340,11 +346,11 @@ elif st.session_state.page == "Scraping":
                 opsi_kategori_list = ["--Pilih Opsi Kategori--", "Proses Semua Kategori", "Pilih Kategori Tertentu"]
                 mode_kategori = st.selectbox("Pilih Opsi Kategori:", opsi_kategori_list)
                 
-                kategori_terpilih_grouped = []
+                kategori_terpilih = []
                 if mode_kategori == 'Pilih Kategori Tertentu':
-                    kategori_terpilih_grouped = st.multiselect(
-                        'Pilih satu atau lebih grup kategori untuk diproses:',
-                        options=grouped_categories
+                    kategori_terpilih = st.multiselect(
+                        'Pilih satu atau lebih kategori untuk diproses:',
+                        options=original_categories
                     )
                 
                 # --- Form hanya untuk tombol submit ---
@@ -353,7 +359,7 @@ elif st.session_state.page == "Scraping":
                         tahun_input == "--Pilih Tahun--" or
                         triwulan_input == "--Pilih Triwulan--" or
                         mode_kategori == "--Pilih Opsi Kategori--" or
-                        (mode_kategori == 'Pilih Kategori Tertentu' and not kategori_terpilih_grouped)
+                        (mode_kategori == 'Pilih Kategori Tertentu' and not kategori_terpilih)
                     )
                     submitted = st.form_submit_button("🚀 Mulai Scraping", use_container_width=True, type="primary", disabled=is_disabled)
 
@@ -366,17 +372,12 @@ elif st.session_state.page == "Scraping":
                     df_lapus_untuk_proses = df_lapus
 
                     if mode_kategori == 'Pilih Kategori Tertentu':
-                        kategori_asli_untuk_diproses = []
-                        for group in kategori_terpilih_grouped:
-                            for original in original_categories:
-                                if original.startswith(group):
-                                    kategori_asli_untuk_diproses.append(original)
-                        df_lapus_untuk_proses = df_lapus[kategori_asli_untuk_diproses]
+                        df_lapus_untuk_proses = df_lapus[kategori_terpilih]
                     
                     st.header("Proses & Hasil Scraping")
                     if mode_kategori == 'Pilih Kategori Tertentu':
-                        nama_kategori_str = ', '.join(kategori_terpilih_grouped)
-                        st.info(f"Memulai Scraping Kategori Grup: {nama_kategori_str} (Periode: {tanggal_awal} - {tanggal_akhir})")
+                        nama_kategori_str = ', '.join(kategori_terpilih)
+                        st.info(f"Memulai Scraping Kategori: {nama_kategori_str} (Periode: {tanggal_awal} - {tanggal_akhir})")
                     else:
                         st.info(f"Memulai Scraping Seluruh Kategori (Periode: {tanggal_awal} - {tanggal_akhir})")
 

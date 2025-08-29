@@ -316,48 +316,45 @@ elif st.session_state.page == "Scraping":
             if df_lapus is not None and df_daerah is not None:
                 st.success("✅ Data kata kunci berhasil dimuat.")
                 original_categories = df_lapus.columns.tolist()
-                # --- LOGIKA BARU UNTUK MENGELOMPOKKAN KATEGORI ---
                 grouped_categories = sorted(list(set([re.split(r'_|-', cat)[0] for cat in original_categories])))
-
+                
                 st.header("Atur Parameter Scraping")
+                
+                # --- PERBAIKAN: Input diletakkan di luar form ---
+                tahun_list = ["--Pilih Tahun--"] + list(range(2020, 2026))
+                tahun_input = st.selectbox("Pilih Tahun:", options=tahun_list)
+
+                triwulan_list = ["--Pilih Triwulan--", "Triwulan 1", "Triwulan 2", "Triwulan 3", "Triwulan 4", "Tanggal Custom"]
+                triwulan_input = st.selectbox("Pilih Triwulan:", options=triwulan_list)
+
+                start_date, end_date = None, None
+                if triwulan_input == "Tanggal Custom":
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        start_date = st.date_input("Masukkan tanggal awal", date.today())
+                    with col2:
+                        end_date = st.date_input("Masukkan tanggal akhir", date.today())
+                
+                st.markdown("---")
+                
+                opsi_kategori_list = ["--Pilih Opsi Kategori--", "Proses Semua Kategori", "Pilih Kategori Tertentu"]
+                mode_kategori = st.selectbox("Pilih Opsi Kategori:", opsi_kategori_list)
+                
+                kategori_terpilih_grouped = []
+                if mode_kategori == 'Pilih Kategori Tertentu':
+                    kategori_terpilih_grouped = st.multiselect(
+                        'Pilih satu atau lebih grup kategori untuk diproses:',
+                        options=grouped_categories
+                    )
+                
+                # --- Form hanya untuk tombol submit ---
                 with st.form("scraping_form"):
-                    
-                    # --- Input Tanggal dan Tahun ---
-                    tahun_list = ["--Pilih Tahun--"] + list(range(2020, 2026))
-                    tahun_input = st.selectbox("Pilih Tahun:", options=tahun_list)
-
-                    triwulan_list = ["--Pilih Triwulan--", "Triwulan 1", "Triwulan 2", "Triwulan 3", "Triwulan 4", "Tanggal Custom"]
-                    triwulan_input = st.selectbox("Pilih Triwulan:", options=triwulan_list)
-
-                    start_date, end_date = None, None
-                    if triwulan_input == "Tanggal Custom":
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            start_date = st.date_input("Masukkan tanggal awal", date.today())
-                        with col2:
-                            end_date = st.date_input("Masukkan tanggal akhir", date.today())
-                    
-                    st.markdown("---")
-                    
-                    # --- Input Kategori ---
-                    opsi_kategori_list = ["--Pilih Opsi Kategori--", "Proses Semua Kategori", "Pilih Kategori Tertentu"]
-                    mode_kategori = st.selectbox("Pilih Opsi Kategori:", opsi_kategori_list)
-                    
-                    kategori_terpilih_grouped = []
-                    if mode_kategori == 'Pilih Kategori Tertentu':
-                        kategori_terpilih_grouped = st.multiselect(
-                            'Pilih satu atau lebih grup kategori untuk diproses:',
-                            options=grouped_categories # Menampilkan kategori yang sudah dikelompokkan
-                        )
-                    
-                    # --- Validasi & Tombol Submit ---
                     is_disabled = (
                         tahun_input == "--Pilih Tahun--" or
                         triwulan_input == "--Pilih Triwulan--" or
                         mode_kategori == "--Pilih Opsi Kategori--" or
                         (mode_kategori == 'Pilih Kategori Tertentu' and not kategori_terpilih_grouped)
                     )
-                    
                     submitted = st.form_submit_button("🚀 Mulai Scraping", use_container_width=True, type="primary", disabled=is_disabled)
 
                 if submitted:
@@ -368,7 +365,6 @@ elif st.session_state.page == "Scraping":
                     timestamp = time.strftime("%Y%m%d-%H%M%S")
                     df_lapus_untuk_proses = df_lapus
 
-                    # --- LOGIKA BARU UNTUK MEMPROSES KATEGORI GRUP ---
                     if mode_kategori == 'Pilih Kategori Tertentu':
                         kategori_asli_untuk_diproses = []
                         for group in kategori_terpilih_grouped:

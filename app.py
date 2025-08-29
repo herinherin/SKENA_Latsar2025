@@ -316,7 +316,6 @@ elif st.session_state.page == "Scraping":
             if df_lapus is not None and df_daerah is not None:
                 st.success("✅ Data kata kunci berhasil dimuat.")
                 original_categories = df_lapus.columns.tolist()
-                grouped_categories = sorted(list(set([re.match(r'([A-Z]+)', cat).group(1) for cat in original_categories])))
                 
                 st.header("Atur Parameter Scraping")
                 with st.form("scraping_form"):
@@ -342,11 +341,11 @@ elif st.session_state.page == "Scraping":
                     opsi_kategori_list = ["--Pilih Opsi Kategori--", "Proses Semua Kategori", "Pilih Kategori Tertentu"]
                     mode_kategori = st.selectbox("Pilih Opsi Kategori:", opsi_kategori_list)
                     
-                    kategori_terpilih_grouped = []
+                    kategori_terpilih = []
                     if mode_kategori == 'Pilih Kategori Tertentu':
-                        kategori_terpilih_grouped = st.multiselect(
-                            'Pilih satu atau lebih grup kategori untuk diproses:',
-                            options=grouped_categories
+                        kategori_terpilih = st.multiselect(
+                            'Pilih satu atau lebih kategori untuk diproses:',
+                            options=original_categories
                         )
                     
                     # --- Validasi & Tombol Submit ---
@@ -354,30 +353,26 @@ elif st.session_state.page == "Scraping":
                         tahun_input == "--Pilih Tahun--" or
                         triwulan_input == "--Pilih Triwulan--" or
                         mode_kategori == "--Pilih Opsi Kategori--" or
-                        (mode_kategori == 'Pilih Kategori Tertentu' and not kategori_terpilih_grouped)
+                        (mode_kategori == 'Pilih Kategori Tertentu' and not kategori_terpilih)
                     )
                     
                     submitted = st.form_submit_button("🚀 Mulai Scraping", use_container_width=True, type="primary", disabled=is_disabled)
 
                 if submitted:
-                    tanggal_awal, tanggal_akhir = get_rentang_tanggal(int(tahun_input), triwulan_input, start_date, end_date)
+                    tahun_int = int(tahun_input)
+                    tanggal_awal, tanggal_akhir = get_rentang_tanggal(tahun_int, triwulan_input, start_date, end_date)
                     
                     start_time = time.time()
                     timestamp = time.strftime("%Y%m%d-%H%M%S")
                     df_lapus_untuk_proses = df_lapus
 
                     if mode_kategori == 'Pilih Kategori Tertentu':
-                        kategori_asli_untuk_diproses = []
-                        for group in kategori_terpilih_grouped:
-                            for original in original_categories:
-                                if original.startswith(group):
-                                    kategori_asli_untuk_diproses.append(original)
-                        df_lapus_untuk_proses = df_lapus[kategori_asli_untuk_diproses]
+                        df_lapus_untuk_proses = df_lapus[kategori_terpilih]
                     
                     st.header("Proses & Hasil Scraping")
                     if mode_kategori == 'Pilih Kategori Tertentu':
-                        nama_kategori_str = ', '.join(kategori_terpilih_grouped)
-                        st.info(f"Memulai Scraping Kategori Grup: {nama_kategori_str} (Periode: {tanggal_awal} - {tanggal_akhir})")
+                        nama_kategori_str = ', '.join(kategori_terpilih)
+                        st.info(f"Memulai Scraping Kategori: {nama_kategori_str} (Periode: {tanggal_awal} - {tanggal_akhir})")
                     else:
                         st.info(f"Memulai Scraping Seluruh Kategori (Periode: {tanggal_awal} - {tanggal_akhir})")
 
@@ -426,3 +421,4 @@ elif st.session_state.page == "Dokumentasi":
     else:
         embed_url = f"https://drive.google.com/embeddedfolderview?id={folder_id}"
         st.components.v1.html(f'<iframe src="{embed_url}" width="100%" height="600" style="border:1px solid #ddd; border-radius: 8px;"></iframe>', height=620)
+

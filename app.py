@@ -1,4 +1,3 @@
-#tambahin:
 import streamlit as st
 import pandas as pd
 import time
@@ -9,6 +8,7 @@ import os
 import base64
 from urllib.parse import quote
 from bs4 import BeautifulSoup
+from datetime import date
 
 # --- Import Library Selenium ---
 from selenium import webdriver
@@ -53,8 +53,14 @@ def load_data_from_url(url, sheet_name=0):
         st.error(f"Gagal memuat data dari URL. Pastikan link dapat diakses. Error: {e}")
         return None
 
-def get_rentang_tanggal(tahun: int, triwulan: str):
-    """Menghasilkan tanggal awal dan akhir berdasarkan tahun dan triwulan."""
+def get_rentang_tanggal(tahun: int, triwulan: str, start_date=None, end_date=None):
+    """Menghasilkan tanggal awal dan akhir berdasarkan tahun dan triwulan atau tanggal custom."""
+    if triwulan == "Tanggal Custom":
+        if start_date and end_date:
+            return start_date.strftime('%m/%d/%Y'), end_date.strftime('%m/%d/%Y')
+        else:
+            return None, None
+            
     triwulan_dict = {
         "Triwulan 1": ("1/1", "3/31"),
         "Triwulan 2": ("4/1", "6/30"),
@@ -82,12 +88,11 @@ def ambil_ringkasan(link):
         return ""
     return ""
 
-def start_scraping(tahun, triwulan, kata_kunci_lapus_df, kata_kunci_daerah_df, start_time):
+def start_scraping(tanggal_awal, tanggal_akhir, kata_kunci_lapus_df, kata_kunci_daerah_df, start_time):
     """Fungsi utama yang membungkus seluruh logika scraping."""
     kata_kunci_lapus_dict = {c: kata_kunci_lapus_df[c].dropna().astype(str).str.strip().tolist() for c in kata_kunci_lapus_df.columns}
     kata_kunci_daerah_dict = {c: kata_kunci_daerah_df[c].dropna().astype(str).str.strip().tolist() for c in kata_kunci_daerah_df.columns}
 
-    tanggal_awal, tanggal_akhir = get_rentang_tanggal(tahun, triwulan)
     nama_daerah = "Konawe Selatan"
     if nama_daerah not in kata_kunci_daerah_dict:
         st.error(f"Kolom '{nama_daerah}' tidak ditemukan dalam data daerah.")
@@ -128,9 +133,9 @@ def start_scraping(tahun, triwulan, kata_kunci_lapus_df, kata_kunci_daerah_df, s
             if pd.isna(keyword_raw): continue
             keyword = str(keyword_raw).strip()
             if not keyword: continue
-
+            
             st.text(f"  ➡️ 🔍 Mencari: {keyword}")
-
+            
             query = quote(keyword + " " + nama_daerah)
             base_url = f"https://www.google.com/search?q={query}&tbm=nws&tbs=cdr:1,cd_min:{tanggal_awal},cd_max:{tanggal_akhir},sbd:1"
 
@@ -145,12 +150,12 @@ def start_scraping(tahun, triwulan, kata_kunci_lapus_df, kata_kunci_daerah_df, s
                     match = re.search(r"[?&]start=(\d+)", href)
                     if match:
                         start_values.add(int(match.group(1)))
-
+                
                 for start in sorted(start_values):
                     page_url = base_url + f"&start={start}"
                     driver.get(page_url)
                     time.sleep(2)
-
+                    
                     judul_elements = driver.find_elements(By.XPATH, "//div[@class='n0jPhd ynAwRc MBeuO nDgy9d']")
                     link_elements = driver.find_elements(By.XPATH, "//a[@class='WlydOe']")
                     tanggal_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'OSrXXb')]/span")
@@ -166,7 +171,7 @@ def start_scraping(tahun, triwulan, kata_kunci_lapus_df, kata_kunci_daerah_df, s
 
                             if not any(loc in judul.lower() for loc in lokasi_filter) and not any(loc in ringkasan.lower() for loc in lokasi_filter):
                                 continue
-
+                            
                             if keyword.lower() not in ringkasan.lower():
                                 continue
 
@@ -307,49 +312,92 @@ elif st.session_state.page == "Scraping":
             with st.spinner("Memuat data kata kunci dari Google Sheets..."):
                 df_lapus = load_data_from_url(url_lapus, sheet_name='Sheet1')
                 df_daerah = load_data_from_url(url_daerah)
+
             if df_lapus is not None and df_daerah is not None:
                 st.success("✅ Data kata kunci berhasil dimuat.")
                 original_categories = df_lapus.columns.tolist()
+                grouped_categories = sorted(list(set([re.match(r'([A-Z]+)', cat).group(1) for cat in original_categories])))
+                
                 st.header("Atur Parameter Scraping")
                 with st.form("scraping_form"):
-                    tahun_input = st.selectbox("Pilih Tahun:", options=list(range(2020, 2026)), index=5)
-                    triwulan_input = st.selectbox("Pilih Triwulan:", options=["Triwulan 1", "Triwulan 2", "Triwulan 3", "Triwulan 4"], index=1)
+                    
+                    # --- Input Tanggal dan Tahun ---
+                    tahun_list = ["--Pilih Tahun--"] + list(range(2020, 2026))
+                    tahun_input = st.selectbox("Pilih Tahun:", options=tahun_list)
+
+                    triwulan_list = ["--Pilih Triwulan--", "Triwulan 1", "Triwulan 2", "Triwulan 3", "Triwulan 4", "Tanggal Custom"]
+                    triwulan_input = st.selectbox("Pilih Triwulan:", options=triwulan_list)
+
+                    start_date, end_date = None, None
+                    if triwulan_input == "Tanggal Custom":
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            start_date = st.date_input("Masukkan tanggal awal", date.today())
+                        with col2:
+                            end_date = st.date_input("Masukkan tanggal akhir", date.today())
+                    
                     st.markdown("---")
-                    mode_kategori = st.radio("Pilih Opsi Kategori:", ('Proses Semua Kategori', 'Pilih Kategori Tertentu'), key='mode_kategori')
-                    kategori_terpilih = []
+                    
+                    # --- Input Kategori ---
+                    opsi_kategori_list = ["--Pilih Opsi Kategori--", "Proses Semua Kategori", "Pilih Kategori Tertentu"]
+                    mode_kategori = st.selectbox("Pilih Opsi Kategori:", opsi_kategori_list)
+                    
+                    kategori_terpilih_grouped = []
                     if mode_kategori == 'Pilih Kategori Tertentu':
-                        default_category = [original_categories[0]] if original_categories else None
-                        kategori_terpilih = st.multiselect('Pilih satu atau lebih kategori untuk diproses:', options=original_categories, default=default_category)
-                    submitted = st.form_submit_button("🚀 Mulai Scraping", use_container_width=True, type="primary")
+                        kategori_terpilih_grouped = st.multiselect(
+                            'Pilih satu atau lebih grup kategori untuk diproses:',
+                            options=grouped_categories
+                        )
+                    
+                    # --- Validasi & Tombol Submit ---
+                    is_disabled = (
+                        tahun_input == "--Pilih Tahun--" or
+                        triwulan_input == "--Pilih Triwulan--" or
+                        mode_kategori == "--Pilih Opsi Kategori--" or
+                        (mode_kategori == 'Pilih Kategori Tertentu' and not kategori_terpilih_grouped)
+                    )
+                    
+                    submitted = st.form_submit_button("🚀 Mulai Scraping", use_container_width=True, type="primary", disabled=is_disabled)
+
                 if submitted:
+                    tanggal_awal, tanggal_akhir = get_rentang_tanggal(int(tahun_input), triwulan_input, start_date, end_date)
+                    
                     start_time = time.time()
                     timestamp = time.strftime("%Y%m%d-%H%M%S")
                     df_lapus_untuk_proses = df_lapus
+
                     if mode_kategori == 'Pilih Kategori Tertentu':
-                        if not kategori_terpilih:
-                            st.warning("Anda memilih 'Pilih Kategori Tertentu' tetapi tidak ada kategori yang dipilih. Proses dibatalkan.")
-                            st.stop()
-                        df_lapus_untuk_proses = df_lapus[kategori_terpilih]
+                        kategori_asli_untuk_diproses = []
+                        for group in kategori_terpilih_grouped:
+                            for original in original_categories:
+                                if original.startswith(group):
+                                    kategori_asli_untuk_diproses.append(original)
+                        df_lapus_untuk_proses = df_lapus[kategori_asli_untuk_diproses]
+                    
                     st.header("Proses & Hasil Scraping")
                     if mode_kategori == 'Pilih Kategori Tertentu':
-                        nama_kategori_str = ', '.join(kategori_terpilih)
-                        st.info(f"Memulai Scraping Kategori: {nama_kategori_str} ({triwulan_input} Tahun {tahun_input})")
+                        nama_kategori_str = ', '.join(kategori_terpilih_grouped)
+                        st.info(f"Memulai Scraping Kategori Grup: {nama_kategori_str} (Periode: {tanggal_awal} - {tanggal_akhir})")
                     else:
-                        st.info(f"Memulai Scraping Seluruh Kategori ({triwulan_input} Tahun {tahun_input})")
-                    hasil_dict = start_scraping(tahun_input, triwulan_input, df_lapus_untuk_proses, df_daerah, start_time)
+                        st.info(f"Memulai Scraping Seluruh Kategori (Periode: {tanggal_awal} - {tanggal_akhir})")
+
+                    hasil_dict = start_scraping(tanggal_awal, tanggal_akhir, df_lapus_untuk_proses, df_daerah, start_time)
+                    
                     end_time = time.time()
                     total_duration = end_time - start_time
                     total_minutes = int(total_duration // 60)
                     total_seconds = int(total_duration % 60)
                     st.session_state.total_duration = f"{total_minutes} menit {total_seconds} detik"
+
                     if hasil_dict:
                         output = io.BytesIO()
                         with pd.ExcelWriter(output, engine='openpyxl') as writer:
                             for kategori, df in hasil_dict.items():
                                 nama_sheet = f"Kategori {kategori}"
                                 df.to_excel(writer, sheet_name=nama_sheet[:31], index=False)
+                        
                         st.session_state.excel_data = output.getvalue()
-                        st.session_state.file_name = f"Hasil_Scraping_{triwulan_input}_{tahun_input}_{timestamp}.xlsx"
+                        st.session_state.file_name = f"Hasil_Scraping_{timestamp}.xlsx"
                         st.session_state.scraping_done = True
                         st.rerun()
                     else:
@@ -372,9 +420,10 @@ elif st.session_state.page == "Dokumentasi":
     st.title("🗂️ Dokumentasi")
     st.markdown("Seluruh file, dataset, dan dokumentasi terkait proyek ini tersimpan di Google Drive berikut.")
     st.markdown("---")
-    folder_id = "1a2b3c4d5e6f7g8h9i0j"
+    folder_id = "1z1_w_FyFmNB7ExfVzFVc3jH5InWmQSvZ"
     if folder_id == "YOUR_FOLDER_ID":
         st.warning("Harap ganti `YOUR_FOLDER_ID` di dalam kode dengan ID folder Google Drive Anda.")
     else:
         embed_url = f"https://drive.google.com/embeddedfolderview?id={folder_id}"
         st.components.v1.html(f'<iframe src="{embed_url}" width="100%" height="600" style="border:1px solid #ddd; border-radius: 8px;"></iframe>', height=620)
+

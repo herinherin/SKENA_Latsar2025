@@ -426,4 +426,3 @@ elif st.session_state.page == "Dokumentasi":
     else:
         embed_url = f"https://drive.google.com/embeddedfolderview?id={folder_id}"
         st.components.v1.html(f'<iframe src="{embed_url}" width="100%" height="600" style="border:1px solid #ddd; border-radius: 8px;"></iframe>', height=620)
-

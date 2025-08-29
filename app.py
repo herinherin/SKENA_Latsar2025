@@ -316,7 +316,9 @@ elif st.session_state.page == "Scraping":
             if df_lapus is not None and df_daerah is not None:
                 st.success("✅ Data kata kunci berhasil dimuat.")
                 original_categories = df_lapus.columns.tolist()
-                
+                # --- LOGIKA BARU UNTUK MENGELOMPOKKAN KATEGORI ---
+                grouped_categories = sorted(list(set([re.split(r'_|-', cat)[0] for cat in original_categories])))
+
                 st.header("Atur Parameter Scraping")
                 with st.form("scraping_form"):
                     
@@ -341,11 +343,11 @@ elif st.session_state.page == "Scraping":
                     opsi_kategori_list = ["--Pilih Opsi Kategori--", "Proses Semua Kategori", "Pilih Kategori Tertentu"]
                     mode_kategori = st.selectbox("Pilih Opsi Kategori:", opsi_kategori_list)
                     
-                    kategori_terpilih = []
+                    kategori_terpilih_grouped = []
                     if mode_kategori == 'Pilih Kategori Tertentu':
-                        kategori_terpilih = st.multiselect(
-                            'Pilih satu atau lebih kategori untuk diproses:',
-                            options=original_categories
+                        kategori_terpilih_grouped = st.multiselect(
+                            'Pilih satu atau lebih grup kategori untuk diproses:',
+                            options=grouped_categories # Menampilkan kategori yang sudah dikelompokkan
                         )
                     
                     # --- Validasi & Tombol Submit ---
@@ -353,7 +355,7 @@ elif st.session_state.page == "Scraping":
                         tahun_input == "--Pilih Tahun--" or
                         triwulan_input == "--Pilih Triwulan--" or
                         mode_kategori == "--Pilih Opsi Kategori--" or
-                        (mode_kategori == 'Pilih Kategori Tertentu' and not kategori_terpilih)
+                        (mode_kategori == 'Pilih Kategori Tertentu' and not kategori_terpilih_grouped)
                     )
                     
                     submitted = st.form_submit_button("🚀 Mulai Scraping", use_container_width=True, type="primary", disabled=is_disabled)
@@ -366,13 +368,19 @@ elif st.session_state.page == "Scraping":
                     timestamp = time.strftime("%Y%m%d-%H%M%S")
                     df_lapus_untuk_proses = df_lapus
 
+                    # --- LOGIKA BARU UNTUK MEMPROSES KATEGORI GRUP ---
                     if mode_kategori == 'Pilih Kategori Tertentu':
-                        df_lapus_untuk_proses = df_lapus[kategori_terpilih]
+                        kategori_asli_untuk_diproses = []
+                        for group in kategori_terpilih_grouped:
+                            for original in original_categories:
+                                if original.startswith(group):
+                                    kategori_asli_untuk_diproses.append(original)
+                        df_lapus_untuk_proses = df_lapus[kategori_asli_untuk_diproses]
                     
                     st.header("Proses & Hasil Scraping")
                     if mode_kategori == 'Pilih Kategori Tertentu':
-                        nama_kategori_str = ', '.join(kategori_terpilih)
-                        st.info(f"Memulai Scraping Kategori: {nama_kategori_str} (Periode: {tanggal_awal} - {tanggal_akhir})")
+                        nama_kategori_str = ', '.join(kategori_terpilih_grouped)
+                        st.info(f"Memulai Scraping Kategori Grup: {nama_kategori_str} (Periode: {tanggal_awal} - {tanggal_akhir})")
                     else:
                         st.info(f"Memulai Scraping Seluruh Kategori (Periode: {tanggal_awal} - {tanggal_akhir})")
 
